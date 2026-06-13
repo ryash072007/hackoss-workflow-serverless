@@ -1,0 +1,11 @@
+comfyui:
+    base_path: /runpod-volume/ComfyUI/models/
+    vae: vae
+    diffusion_models: diffusion_models
+    loras: loras
+    text_encoders: text_encoders
+
+# Add this section specifically for controlnet_aux checkpoints
+controlnet_aux:
+    base_path: /runpod-volume/ComfyUI/controlnet_aux_ckpts/
+    controlnet: .
