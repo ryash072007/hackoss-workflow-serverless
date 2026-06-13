@@ -7,16 +7,18 @@ import json
 import uuid
 import os
 from urllib.parse import urlparse
+from runpod.serverless.utils import rp_upload
 
 # ComfyUI server setup
 COMFYUI_DIR = "/ComfyUI"
+# COMFYUI_DIR = "C:\\Users\\ryash\\OneDrive\\Documents\\AI\\ComfyUI_windows_portable\\ComfyUI"
 COMFYUI_URL = "http://127.0.0.1:8188"
 
 def start_comfyui():
     """Starts the ComfyUI server."""
-    os.chdir(COMFYUI_DIR)
     command = "python3 main.py --listen"
-    server_process = subprocess.Popen(command.split())
+    # Execute the subprocess in COMFYUI_DIR without changing the global process directory
+    server_process = subprocess.Popen(command.split(), cwd=COMFYUI_DIR)
     return server_process
 
 def check_server_ready(url):
@@ -43,12 +45,6 @@ def get_history(prompt_id):
         response.raise_for_status()
         return response.json()
 
-def get_video(filename, subfolder, folder_type):
-    """Gets a video from the ComfyUI server."""
-    with requests.get(f"{COMFYUI_URL}/view", params={"filename": filename, "subfolder": subfolder, "type": folder_type}) as response:
-        response.raise_for_status()
-        return response.content
-
 def download_video(url, save_path):
     """Downloads a video from a URL."""
     with requests.get(url, stream=True) as r:
@@ -62,7 +58,10 @@ def handler(event):
     """The serverless handler function."""
     print("Worker Start")
     
-    input_data = event['input']
+    # Capture the unique RunPod job ID to use as the output filename
+    job_id = event.get('id', str(uuid.uuid4())) 
+    
+    input_data = event.get('input', {})
     video_url = input_data.get('video_url')
 
     if not video_url:
@@ -73,8 +72,11 @@ def handler(event):
     input_video_path = os.path.join(COMFYUI_DIR, "input", video_filename)
     download_video(video_url, input_video_path)
 
-    # Load the workflow
-    with open("oss_stickman_api.json", 'r') as f:
+    # Load the workflow using an absolute path
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    workflow_path = os.path.join(script_dir, "oss_stickman_api.json")
+    
+    with open(workflow_path, 'r') as f:
         prompt = json.load(f)
 
     # Update the video path in the workflow
@@ -85,25 +87,36 @@ def handler(event):
     prompt_id = queue_prompt(prompt)['prompt_id']
     
     # Wait for the output
-    output_video = None
-    while not output_video:
+    while True:
         history = get_history(prompt_id)
-        if prompt_id in history and 'outputs' in history[prompt_id]:
-            outputs = history[prompt_id]['outputs']
-            # Find the output video from node 167 (VHS_VideoCombine)
-            if "167" in outputs and "videos" in outputs["167"]:
-                video_data = outputs["167"]["videos"][0]
-                video_content = get_video(video_data['filename'], video_data['subfolder'], video_data['type'])
+        
+        if prompt_id in history:
+            outputs = history[prompt_id].get('outputs', {})
+            
+            for node_output in outputs.values():
+                media_list = node_output.get('gifs') or node_output.get('videos')
                 
-                # Save the output video
-                output_filename = f"output_{uuid.uuid4()}.mp4"
-                output_path = os.path.join("/tmp", output_filename)
-                with open(output_path, "wb") as f:
-                    f.write(video_content)
+                if media_list and media_list[0].get('type') == 'output':
+                    filename = media_list[0]['filename']
+                    physical_path = os.path.join(COMFYUI_DIR, "output", filename)
+                    
+                    if os.path.exists(physical_path):
+                        print(f"Success. Video located at: {physical_path}")
+                        
+                        # Execute the built-in RunPod upload
+                        upload_filename = f"{job_id}.mp4"
+                        public_url = rp_upload.upload_file_to_bucket(upload_filename, physical_path)
+                        
+                        # Clean up the local file to prevent storage bloat
+                        os.remove(physical_path)
+                        
+                        return {
+                            "status": "success", 
+                            "video_url": public_url
+                        }
+            
+            return {"error": "Workflow failed. No final video was found in the ComfyUI output folder."}
                 
-                output_video = output_path
-                print(f"Output video saved to: {output_video}")
-                break
         time.sleep(1)
 
     # TODO: Upload the output video to a cloud storage and return the URL

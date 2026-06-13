@@ -1,50 +1,46 @@
-FROM runpod/pytorch:2.2.0-py3.10-cuda12.1.1-devel-ubuntu22.04
+FROM runpod/pytorch:2.8.0-py3.11-cuda12.8.1-cudnn-devel-ubuntu22.04
 
-# Install dependencies
+# Install system dependencies
 RUN apt-get update && apt-get install -y \
     git \
     wget \
     ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-# Clone ComfyUI and install dependencies
+# Clone ComfyUI and install core dependencies
 RUN git clone https://github.com/comfyanonymous/ComfyUI.git /ComfyUI
 WORKDIR /ComfyUI
-RUN pip install -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Install ComfyUI Custom Nodes
+# Install ComfyUI Custom Nodes (Chained to prevent layer bloat)
 RUN git clone https://github.com/kosinkadink/ComfyUI-VideoHelperSuite.git /ComfyUI/custom_nodes/ComfyUI-VideoHelperSuite && \
-    cd /ComfyUI/custom_nodes/ComfyUI-VideoHelperSuite && pip install -r requirements.txt && \
+    pip install --no-cache-dir -r /ComfyUI/custom_nodes/ComfyUI-VideoHelperSuite/requirements.txt && \
     git clone https://github.com/Fannovel16/comfyui_controlnet_aux.git /ComfyUI/custom_nodes/comfyui_controlnet_aux && \
-    cd /ComfyUI/custom_nodes/comfyui_controlnet_aux && pip install -r requirements.txt
+    pip install --no-cache-dir -r /ComfyUI/custom_nodes/comfyui_controlnet_aux/requirements.txt
 
-# Download models
-RUN mkdir -p /ComfyUI/models/vae && \
-    wget -O /ComfyUI/models/vae/wan_2.1_vae.safetensors https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors && \
-    \
-    mkdir -p /ComfyUI/models/diffusion_models && \
-    wget -O /ComfyUI/models/diffusion_models/wan2.1_vace_1.3B_fp16.safetensors https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_vace_1.3B_fp16.safetensors && \
-    \
-    mkdir -p /ComfyUI/models/loras && \
-    wget -O /ComfyUI/models/loras/Wan21_CausVid_bidirect2_T2V_1_3B_lora_rank32.safetensors https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/Wan21_CausVid_bidirect2_T2V_1_3B_lora_rank32.safetensors && \
-    \
-    mkdir -p /ComfyUI/models/text_encoders && \
-    wget -O /ComfyUI/models/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors && \
-    \
-    wget -O /ComfyUI/models/loras/wan21_13_r32_S_LN_res_512_000003000.safetensors https://huggingface.co/RyashDev/blue_stickman_wan_21_13/resolve/main/wan21_13_r32_S_LN_res_512_000003000.safetensors && \
-    \
-    mkdir -p /ComfyUI/custom_nodes/comfyui_controlnet_aux/ckpts/hr16/DWPose-TorchScript-BatchSize5 && \
-    wget -O /ComfyUI/custom_nodes/comfyui_controlnet_aux/ckpts/hr16/DWPose-TorchScript-BatchSize5/dw-ll_ucoco_384_bs5.torchscript.pt https://huggingface.co/hr16/DWPose-TorchScript-BatchSize5/resolve/main/dw-ll_ucoco_384_bs5.torchscript.pt && \
-    \
-    mkdir -p /ComfyUI/custom_nodes/comfyui_controlnet_aux/ckpts/hr16/yolo-nas-fp16 && \
-    wget -O /ComfyUI/custom_nodes/comfyui_controlnet_aux/ckpts/hr16/yolo-nas-fp16/yolo_nas_s_fp16.onnx https://huggingface.co/hr16/yolo-nas-fp16/resolve/main/yolo_nas_s_fp16.onnx
+# Create necessary model directories inside the container
+RUN mkdir -p /ComfyUI/models/vae \
+             /ComfyUI/models/diffusion_models \
+             /ComfyUI/models/loras \
+             /ComfyUI/models/text_encoders \
+             /ComfyUI/custom_nodes/comfyui_controlnet_aux/ckpts/hr16/DWPose-TorchScript-BatchSize5 \
+             /ComfyUI/custom_nodes/comfyui_controlnet_aux/ckpts/hr16/yolo-nas-fp16
 
-# Copy the rest of the files
+# COPY local models into the container image
+COPY models/vae/ /ComfyUI/models/vae/
+COPY models/diffusion_models/ /ComfyUI/models/diffusion_models/
+COPY models/loras/ /ComfyUI/models/loras/
+COPY models/text_encoders/ /ComfyUI/models/text_encoders/
+COPY models/controlnet_aux_ckpts/DWPose-TorchScript-BatchSize5/ /ComfyUI/custom_nodes/comfyui_controlnet_aux/ckpts/hr16/DWPose-TorchScript-BatchSize5/
+COPY models/controlnet_aux_ckpts/yolo-nas-fp16/ /ComfyUI/custom_nodes/comfyui_controlnet_aux/ckpts/hr16/yolo-nas-fp16/
+
+# Copy handler configuration and entrypoint files
 WORKDIR /
 COPY requirements.txt /requirements.txt
-RUN pip install -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 COPY rp_handler.py /
 COPY oss_stickman_api.json /
+COPY tpose_stickman.png /ComfyUI/input/tpose_stickman.png
 
 # Set the entrypoint
 CMD ["python3", "-u", "rp_handler.py"]

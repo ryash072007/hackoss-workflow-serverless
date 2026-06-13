@@ -1,6 +1,5 @@
 runpod
 requests
-comfyui
 Pillow
 torch
 torchvision
