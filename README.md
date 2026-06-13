@@ -2,6 +2,9 @@
 
 This repository contains a serverless backend worker designed for deployment on RunPod. It encapsulates a ComfyUI instance, executes a predefined video-to-video animation workflow (`oss_stickman_api.json`), and handles direct cloud storage uploads to Cloudflare R2 using standard S3 APIs.
 
+ENDPOINT_ID: ppow5bwr1w4nrr
+RUNPOD API KEY in .env file
+
 ## Architecture Overview
 
 1. **Initialization:** The worker spins up a local ComfyUI subprocess within the Docker container.
@@ -32,7 +35,7 @@ BUCKET_SECRET_ACCESS_KEY=<YOUR_R2_SECRET_KEY>
 
 *Note: Ensure `.env` is added to your `.gitignore` file to prevent credential leakage.*
 
-## Local Testing (Docker)
+## Local Testing (Docker) - DO NOT USE
 
 To test the worker locally, utilize bind mounts to inject the handler script, workflow JSON, and environment variables into the base container runtime.
 
@@ -85,6 +88,12 @@ Implement a client-side polling loop (every 3–5 seconds) to check the job stat
 GET https://api.runpod.ai/v2/<ENDPOINT_ID>/status/<JOB_ID>
 Authorization: Bearer <RUNPOD_API_KEY>
 
+```
+```json
+{
+    "id": "d34c326d-a097-4517-bbf5-a63168b12a37-e1",
+    "status": "IN_QUEUE"
+}
 ```
 
 ### 3. Final Output
