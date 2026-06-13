@@ -6,12 +6,12 @@ import requests
 import json
 import uuid
 import os
+import boto3
+from botocore.config import Config
 from urllib.parse import urlparse
-from runpod.serverless.utils import rp_upload
 
 # ComfyUI server setup
 COMFYUI_DIR = "/ComfyUI"
-# COMFYUI_DIR = "C:\\Users\\ryash\\OneDrive\\Documents\\AI\\ComfyUI_windows_portable\\ComfyUI"
 COMFYUI_URL = "http://127.0.0.1:8188"
 
 def start_comfyui():
@@ -103,9 +103,27 @@ def handler(event):
                     if os.path.exists(physical_path):
                         print(f"Success. Video located at: {physical_path}")
                         
-                        # Execute the built-in RunPod upload
                         upload_filename = f"{job_id}.mp4"
-                        public_url = rp_upload.upload_file_to_bucket(upload_filename, physical_path)
+                        bucket_name = os.environ.get('BUCKET_NAME')
+                        
+                        # Standard Boto3 initialization for Cloudflare R2
+                        s3_client = boto3.client(
+                            's3',
+                            endpoint_url=os.environ.get('BUCKET_ENDPOINT_URL'),
+                            aws_access_key_id=os.environ.get('BUCKET_ACCESS_KEY_ID'),
+                            aws_secret_access_key=os.environ.get('BUCKET_SECRET_ACCESS_KEY'),
+                            region_name=os.environ.get('AWS_DEFAULT_REGION', 'auto')
+                        )
+                        
+                        # Upload directly to R2
+                        s3_client.upload_file(physical_path, bucket_name, upload_filename)
+                        
+                        # Generate SigV4 pre-signed URL
+                        public_url = s3_client.generate_presigned_url(
+                            'get_object',
+                            Params={'Bucket': bucket_name, 'Key': upload_filename},
+                            ExpiresIn=604800 
+                        )
                         
                         # Clean up the local file to prevent storage bloat
                         os.remove(physical_path)
@@ -118,11 +136,6 @@ def handler(event):
             return {"error": "Workflow failed. No final video was found in the ComfyUI output folder."}
                 
         time.sleep(1)
-
-    # TODO: Upload the output video to a cloud storage and return the URL
-    # For now, we'll just return a success message
-    
-    return {"status": "success", "output_path": output_video}
 
 
 if __name__ == '__main__':
