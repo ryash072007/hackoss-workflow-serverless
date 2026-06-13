@@ -1,1 +1,7 @@
-runpod==1.7.12
+runpod
+requests
+comfyui
+Pillow
+torch
+torchvision
+torchaudio

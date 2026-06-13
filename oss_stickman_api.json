@@ -1,0 +1,375 @@
+{
+  "6": {
+    "inputs": {
+      "text": "AWEMELLO_STICKMAN, stickman dancing, 2D animation, cel-shaded, clean line art, crisp lines, sharp focus, high resolution, high quality, 4k, vector-like clarity, flat colors, solid fills, consistent line weight, clean shading, smooth gradients, frame-accurate, keyframe style, no blur artifacts, razor-sharp edges, simplified background, clear silhouettes, well-defined contours, precise inked lines, minimal noise, blank white background. AWEMELLO_STICKMAN",
+      "clip": [
+        "159",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Positive Prompt)"
+    }
+  },
+  "7": {
+    "inputs": {
+      "text": "blurry, out of focus, motion blur, camera shake, soft focus, double image, ghosting, streaks, low resolution, pixelated, compression artifacts, jpeg artifacts, noise, grain, smudged lines, watercolor bleed, painterly smudge, depth of field, shaky camera, overblurred, motion streaks, fuzzy edges, low detail, inconsistent line weight, low quality, hands, palms, fingers, trees, blobs",
+      "clip": [
+        "159",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Negative Prompt)"
+    }
+  },
+  "8": {
+    "inputs": {
+      "samples": [
+        "58",
+        0
+      ],
+      "vae": [
+        "105",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "48": {
+    "inputs": {
+      "shift": 6,
+      "model": [
+        "159",
+        0
+      ]
+    },
+    "class_type": "ModelSamplingSD3",
+    "_meta": {
+      "title": "ModelSamplingSD3"
+    }
+  },
+  "49": {
+    "inputs": {
+      "width": 480,
+      "height": 832,
+      "length": [
+        "154",
+        1
+      ],
+      "batch_size": 1,
+      "strength": 1,
+      "positive": [
+        "6",
+        0
+      ],
+      "negative": [
+        "7",
+        0
+      ],
+      "vae": [
+        "105",
+        0
+      ],
+      "control_video": [
+        "156",
+        0
+      ],
+      "reference_image": [
+        "155",
+        0
+      ]
+    },
+    "class_type": "WanVaceToVideo",
+    "_meta": {
+      "title": "WanVaceToVideo"
+    }
+  },
+  "58": {
+    "inputs": {
+      "trim_amount": [
+        "49",
+        3
+      ],
+      "samples": [
+        "169",
+        0
+      ]
+    },
+    "class_type": "TrimVideoLatent",
+    "_meta": {
+      "title": "TrimVideoLatent"
+    }
+  },
+  "105": {
+    "inputs": {
+      "vae_name": "wan_2.1_vae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "Load VAE"
+    }
+  },
+  "108": {
+    "inputs": {
+      "unet_name": "wan2.1_vace_1.3B_fp16.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "Load Diffusion Model"
+    }
+  },
+  "109": {
+    "inputs": {
+      "lora_name": "Wan21_CausVid_bidirect2_T2V_1_3B_lora_rank32.safetensors",
+      "strength_model": 0.8,
+      "strength_clip": 1,
+      "model": [
+        "108",
+        0
+      ],
+      "clip": [
+        "110",
+        0
+      ]
+    },
+    "class_type": "LoraLoader",
+    "_meta": {
+      "title": "Load LoRA (Model and CLIP)"
+    }
+  },
+  "110": {
+    "inputs": {
+      "clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+      "type": "wan",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "Load CLIP"
+    }
+  },
+  "134": {
+    "inputs": {
+      "image": "tpose_stickman.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  },
+  "152": {
+    "inputs": {
+      "detect_hand": "disable",
+      "detect_body": "enable",
+      "detect_face": "disable",
+      "resolution": 128,
+      "bbox_detector": "yolo_nas_s_fp16.onnx",
+      "pose_estimator": "dw-ll_ucoco_384_bs5.torchscript.pt",
+      "scale_stick_for_xinsr_cn": "disable",
+      "image": [
+        "154",
+        0
+      ]
+    },
+    "class_type": "DWPreprocessor",
+    "_meta": {
+      "title": "DWPose Estimator"
+    }
+  },
+  "153": {
+    "inputs": {
+      "frame_rate": 16,
+      "loop_count": 0,
+      "filename_prefix": "pose/img",
+      "format": "video/nvenc_h264-mp4",
+      "pix_fmt": "yuv420p",
+      "bitrate": 10,
+      "megabit": true,
+      "save_metadata": true,
+      "pingpong": false,
+      "save_output": false,
+      "images": [
+        "156",
+        0
+      ]
+    },
+    "class_type": "VHS_VideoCombine",
+    "_meta": {
+      "title": "Video Combine 🎥🅥🅗🅢"
+    }
+  },
+  "154": {
+    "inputs": {
+      "video": "oss_input_video.mp4",
+      "force_rate": 16,
+      "custom_width": 480,
+      "custom_height": 832,
+      "frame_load_cap": 81,
+      "skip_first_frames": 0,
+      "select_every_nth": 1,
+      "format": "Wan"
+    },
+    "class_type": "VHS_LoadVideo",
+    "_meta": {
+      "title": "Load Video (Upload) 🎥🅥🅗🅢"
+    }
+  },
+  "155": {
+    "inputs": {
+      "target_width": 480,
+      "target_height": 832,
+      "padding_color": "white",
+      "interpolation": "area",
+      "image": [
+        "134",
+        0
+      ]
+    },
+    "class_type": "ResizeAndPadImage",
+    "_meta": {
+      "title": "Resize And Pad Image"
+    }
+  },
+  "156": {
+    "inputs": {
+      "target_width": 480,
+      "target_height": 832,
+      "padding_color": "black",
+      "interpolation": "area",
+      "image": [
+        "152",
+        0
+      ]
+    },
+    "class_type": "ResizeAndPadImage",
+    "_meta": {
+      "title": "Resize And Pad Image"
+    }
+  },
+  "157": {
+    "inputs": {
+      "images": [
+        "155",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Image"
+    }
+  },
+  "159": {
+    "inputs": {
+      "lora_name": "wan21_13_r32_S_LN_res_512_000003000.safetensors",
+      "strength_model": 1,
+      "strength_clip": 1,
+      "model": [
+        "109",
+        0
+      ],
+      "clip": [
+        "109",
+        1
+      ]
+    },
+    "class_type": "LoraLoader",
+    "_meta": {
+      "title": "Load LoRA (Model and CLIP)"
+    }
+  },
+  "167": {
+    "inputs": {
+      "frame_rate": 16,
+      "loop_count": 0,
+      "filename_prefix": "AnimateDiff",
+      "format": "video/nvenc_h264-mp4",
+      "pix_fmt": "yuv420p",
+      "bitrate": 10,
+      "megabit": true,
+      "save_metadata": true,
+      "pingpong": false,
+      "save_output": true,
+      "images": [
+        "8",
+        0
+      ]
+    },
+    "class_type": "VHS_VideoCombine",
+    "_meta": {
+      "title": "Video Combine 🎥🅥🅗🅢"
+    }
+  },
+  "168": {
+    "inputs": {
+      "add_noise": "enable",
+      "noise_seed": 23,
+      "steps": 4,
+      "cfg": 1,
+      "sampler_name": "lcm",
+      "scheduler": "beta",
+      "start_at_step": 0,
+      "end_at_step": 1,
+      "return_with_leftover_noise": "enable",
+      "model": [
+        "48",
+        0
+      ],
+      "positive": [
+        "49",
+        0
+      ],
+      "negative": [
+        "49",
+        1
+      ],
+      "latent_image": [
+        "49",
+        2
+      ]
+    },
+    "class_type": "KSamplerAdvanced",
+    "_meta": {
+      "title": "KSampler (Advanced)"
+    }
+  },
+  "169": {
+    "inputs": {
+      "add_noise": "disable",
+      "noise_seed": 23,
+      "steps": 4,
+      "cfg": 1,
+      "sampler_name": "lcm",
+      "scheduler": "beta",
+      "start_at_step": 1,
+      "end_at_step": 4,
+      "return_with_leftover_noise": "disable",
+      "model": [
+        "48",
+        0
+      ],
+      "positive": [
+        "49",
+        0
+      ],
+      "negative": [
+        "49",
+        1
+      ],
+      "latent_image": [
+        "168",
+        0
+      ]
+    },
+    "class_type": "KSamplerAdvanced",
+    "_meta": {
+      "title": "KSampler (Advanced)"
+    }
+  }
+}

@@ -1,6 +1,5 @@
 {
     "input": {
-        "prompt": "John Doe",
-        "seconds": 15
+        "video_url": "https://raw.githubusercontent.com/ryash072007/test/main/oss_input_video.mp4"
     }
 }
