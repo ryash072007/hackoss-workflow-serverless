@@ -14,9 +14,9 @@ QUEUE_NAME = os.environ.get("PGMQ_QUEUE_NAME")
 RUNPOD_API_KEY = os.environ.get("RUNPOD_API_KEY")
 
 # Correction: Search for the variable name, fallback to the literal string
-# RUNPOD_ENDPOINT_ID = os.environ.get("RUNPOD_ENDPOINT_ID", "ppow5bwr1w4nrr")
-# RUNPOD_URL = f"https://api.runpod.ai/v2/{RUNPOD_ENDPOINT_ID}/runsync"
-RUNPOD_URL = f"https://localhost:8000/runsync"
+RUNPOD_ENDPOINT_ID = os.environ.get("RUNPOD_ENDPOINT_ID", "ppow5bwr1w4nrr")
+RUNPOD_URL = f"https://api.runpod.ai/v2/{RUNPOD_ENDPOINT_ID}/runsync"
+# RUNPOD_URL = f"https://localhost:8000/runsync"
 
 def get_db_connection():
     """Establish a connection to Postgres."""
