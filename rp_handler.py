@@ -54,6 +54,8 @@ def download_video(url, save_path):
                 f.write(chunk)
     return save_path
 
+
+
 def handler(event):
     """The serverless handler function."""
     print("Worker Start")
@@ -62,15 +64,40 @@ def handler(event):
     job_id = event.get('id', str(uuid.uuid4())) 
     
     input_data = event.get('input', {})
-    video_url = input_data.get('video_url')
+    object_key = input_data.get('objectKey')
+    # video_url = input_data.get('video_url')
 
-    if not video_url:
-        return {"error": "video_url not provided"}
+    if not object_key:
+        return {"error": "object_key not provided"}
 
-    # Download the input video
-    video_filename = os.path.basename(urlparse(video_url).path)
+    # # Download the input video
+    # video_filename = os.path.basename(urlparse(video_url).path)
+    # input_video_path = os.path.join(COMFYUI_DIR, "input", video_filename)
+    # download_video(video_url, input_video_path)
+
+    bucket_name = os.environ.get('SUPABASE_S3_BUCKET')
+    
+    # Initialize S3 Client immediately for both download and upload
+    try:
+        s3_client = boto3.client(
+            's3',
+            endpoint_url=os.environ.get('SUPABASE_S3_ENDPOINT'),
+            aws_access_key_id=os.environ.get('SUPABASE_S3_ACCESS_KEY'),
+            aws_secret_access_key=os.environ.get('SUPABASE_S3_SECRET_KEY'),
+            region_name=os.environ.get('SUPABASE_S3_REGION', 'auto')
+        )
+    except Exception as e:
+        return {"error": f"Failed to initialize S3 client: {str(e)}"}
+
+    # Download source video using objectKey
+    video_filename = os.path.basename(object_key)
     input_video_path = os.path.join(COMFYUI_DIR, "input", video_filename)
-    download_video(video_url, input_video_path)
+    
+    try:
+        print(f"Downloading {object_key} from S3...")
+        s3_client.download_file(bucket_name, object_key, input_video_path)
+    except Exception as e:
+        return {"error": f"Failed to download video from S3: {str(e)}"}
 
     # Load the workflow using an absolute path
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -107,13 +134,13 @@ def handler(event):
                         bucket_name = os.environ.get('SUPABASE_S3_BUCKET') # BUCKET_NAME
                         
                         # Standard Boto3 initialization for Cloudflare R2
-                        s3_client = boto3.client(
-                            's3',
-                            endpoint_url=os.environ.get('SUPABASE_S3_ENDPOINT'), # BUCKET_ENDPOINT_URL
-                            aws_access_key_id=os.environ.get('SUPABASE_S3_ACCESS_KEY'), # BUCKET_ACCESS_KEY_ID
-                            aws_secret_access_key=os.environ.get('SUPABASE_S3_SECRET_KEY'), # BUCKET_SECRET_ACCESS_KEY
-                            region_name=os.environ.get('SUPABASE_S3_REGION', 'auto') # AWS_DEFAULT_REGION
-                        )
+                        # s3_client = boto3.client(
+                        #     's3',
+                        #     endpoint_url=os.environ.get('SUPABASE_S3_ENDPOINT'), # BUCKET_ENDPOINT_URL
+                        #     aws_access_key_id=os.environ.get('SUPABASE_S3_ACCESS_KEY'), # BUCKET_ACCESS_KEY_ID
+                        #     aws_secret_access_key=os.environ.get('SUPABASE_S3_SECRET_KEY'), # BUCKET_SECRET_ACCESS_KEY
+                        #     region_name=os.environ.get('SUPABASE_S3_REGION', 'auto') # AWS_DEFAULT_REGION
+                        # )
                         
                         # Upload directly to R2
                         s3_client.upload_file(physical_path, bucket_name, upload_filename, ExtraArgs={'ContentType': 'video/mp4'})
