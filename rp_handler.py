@@ -54,6 +54,43 @@ def download_video(url, save_path):
                 f.write(chunk)
     return save_path
 
+# --- Backend Telemetry ---
+def update_job_status(job_id, status, percent, object_key=None, error_msg=None):
+    """Pushes job state to your custom backend contract."""
+    BACKEND_API_URL = os.environ.get('BACKEND_API_URL')
+    BACKEND_API_KEY = os.environ.get('BACKEND_API_KEY')
+    if not BACKEND_API_URL:
+        print("Warning: BACKEND_API_URL not set. Cannot report status.")
+        return
+
+    endpoint = f"{BACKEND_API_URL.rstrip('/')}/jobs/{job_id}"
+    
+    payload = {
+        "percentCompleted": percent,
+        "jobStatus": status
+    }
+    
+    if object_key:
+        payload["stickmanifiedS3ObjectKey"] = object_key
+    if error_msg:
+        payload["errorMessage"] = error_msg
+
+    headers = {
+        "Content-Type": "application/json",
+        "X-ADMIN-TOKEN": os.environ.get("X_ADMIN_TOKEN")
+    }
+    
+    # If your backend requires an auth token to prevent random people from updating jobs
+    if BACKEND_API_KEY:
+        headers["Authorization"] = f"Bearer {BACKEND_API_KEY}"
+
+    try:
+        response = requests.put(endpoint, json=payload, headers=headers, timeout=10)
+        response.raise_for_status()
+        print(f"Successfully updated backend job {job_id} to {status}")
+    except requests.exceptions.RequestException as e:
+        print(f"CRITICAL: Failed to update backend job status for {job_id}. Error: {str(e)}")
+
 def handler(event):
     """The serverless handler function."""
     print("Worker Start")
@@ -62,15 +99,42 @@ def handler(event):
     job_id = event.get('id', str(uuid.uuid4())) 
     
     input_data = event.get('input', {})
-    video_url = input_data.get('video_url')
+    object_key = input_data.get('objectKey')
 
-    if not video_url:
-        return {"error": "video_url not provided"}
+    if not object_key:
+        err = "objectKey not provided in input payload"
+        update_job_status(job_id, "FAILED", 0, error_msg=err)
+        return {"error": "object_key not provided"}
 
-    # Download the input video
-    video_filename = os.path.basename(urlparse(video_url).path)
+    update_job_status(job_id, "IN_PROGRESS", 5)
+    bucket_name = os.environ.get('SUPABASE_S3_BUCKET')
+    
+    # Initialize S3 Client immediately for both download and upload
+    try:
+        s3_client = boto3.client(
+            's3',
+            endpoint_url=os.environ.get('SUPABASE_S3_ENDPOINT'),
+            aws_access_key_id=os.environ.get('SUPABASE_S3_ACCESS_KEY'),
+            aws_secret_access_key=os.environ.get('SUPABASE_S3_SECRET_KEY'),
+            region_name=os.environ.get('SUPABASE_S3_REGION', 'auto')
+        )
+    except Exception as e:
+        err = f"Failed to initialize S3 client: {str(e)}"
+        update_job_status(job_id, "FAILED", 10, error_msg=err)
+        return {"error": f"Failed to initialize S3 client: {str(e)}"}
+
+    # Download source video using objectKey
+    video_filename = os.path.basename(object_key)
     input_video_path = os.path.join(COMFYUI_DIR, "input", video_filename)
-    download_video(video_url, input_video_path)
+    
+    try:
+        print(f"Downloading {object_key} from S3...")
+        s3_client.download_file(bucket_name, object_key, input_video_path)
+        update_job_status(job_id, "IN_PROGRESS", 15)
+    except Exception as e:
+        err = f"Failed to download video from S3: {str(e)}"
+        update_job_status(job_id, "FAILED", 10, error_msg=err)
+        return {"error": f"Failed to download video from S3: {str(e)}"}
 
     # Load the workflow using an absolute path
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -86,11 +150,14 @@ def handler(event):
     # Queue the prompt
     prompt_id = queue_prompt(prompt)['prompt_id']
     
+    update_job_status(job_id, "IN_PROGRESS", 20)
+
     # Wait for the output
     while True:
         history = get_history(prompt_id)
         
         if prompt_id in history:
+            update_job_status(job_id, "IN_PROGRESS", 90)
             outputs = history[prompt_id].get('outputs', {})
             
             for node_output in outputs.values():
@@ -104,35 +171,32 @@ def handler(event):
                         print(f"Success. Video located at: {physical_path}")
                         
                         upload_filename = f"{job_id}.mp4"
-                        bucket_name = os.environ.get('BUCKET_NAME')
-                        
-                        # Standard Boto3 initialization for Cloudflare R2
-                        s3_client = boto3.client(
-                            's3',
-                            endpoint_url=os.environ.get('BUCKET_ENDPOINT_URL'),
-                            aws_access_key_id=os.environ.get('BUCKET_ACCESS_KEY_ID'),
-                            aws_secret_access_key=os.environ.get('BUCKET_SECRET_ACCESS_KEY'),
-                            region_name=os.environ.get('AWS_DEFAULT_REGION', 'auto')
-                        )
+                        bucket_name = os.environ.get('SUPABASE_S3_BUCKET_OUTPUT') # BUCKET_NAME
                         
                         # Upload directly to R2
-                        s3_client.upload_file(physical_path, bucket_name, upload_filename)
+                        s3_client.upload_file(physical_path, bucket_name, upload_filename, ExtraArgs={'ContentType': 'video/mp4'})
                         
                         # Generate SigV4 pre-signed URL
-                        public_url = s3_client.generate_presigned_url(
-                            'get_object',
-                            Params={'Bucket': bucket_name, 'Key': upload_filename},
-                            ExpiresIn=604800 
-                        )
+                        # public_url = s3_client.generate_presigned_url(
+                        #     'get_object',
+                        #     Params={'Bucket': bucket_name, 'Key': upload_filename},
+                        #     ExpiresIn=604800 
+                        # )
                         
                         # Clean up the local file to prevent storage bloat
                         os.remove(physical_path)
+                        if os.path.exists(input_video_path):
+                            os.remove(input_video_path)
                         
+                        update_job_status(job_id, "COMPLETED", 100, object_key=upload_filename)
+
                         return {
                             "status": "success", 
-                            "video_url": public_url
+                            # "video_url": public_url
                         }
             
+            err = "Workflow completed but no final video was found."
+            update_job_status(job_id, "FAILED", 90, error_msg=err)
             return {"error": "Workflow failed. No final video was found in the ComfyUI output folder."}
                 
         time.sleep(1)

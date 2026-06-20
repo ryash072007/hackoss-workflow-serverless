@@ -1,32 +1,34 @@
 # ComfyUI Serverless Worker: Stickman Animation Pipeline
 
-This repository contains a serverless backend worker designed for deployment on RunPod. It encapsulates a ComfyUI instance, executes a predefined video-to-video animation workflow (`oss_stickman_api.json`), and handles direct cloud storage uploads to Cloudflare R2 using standard S3 APIs.
+This repository contains a serverless backend worker designed for deployment on RunPod. It encapsulates a local ComfyUI instance, executes a predefined video-to-video animation workflow (`oss_stickman_api.json`), handles S3 object storage operations (download/upload), and pushes job state telemetry to a custom backend API.
+
+ENDPOINT_ID: ppow5bwr1w4nrr
 
 ## Architecture Overview
 
 1. **Initialization:** The worker spins up a local ComfyUI subprocess within the Docker container.
-2. **Payload Reception:** Accepts a JSON payload containing an input `video_url`.
-3. **Execution:** Injects the downloaded video into the ComfyUI workflow and queues the generation prompt.
-4. **Storage & Egress:** Bypasses local network transfer by locating the generated MP4 directly on the container's disk, uploading it to Cloudflare R2 via `boto3`, and generating a pre-signed download URL valid for 7 days.
-
-## Prerequisites
-
-* **Docker:** For local testing and container compilation.
-* **RunPod Account:** For serverless endpoint deployment.
-* **Cloudflare R2 Bucket:** For zero-egress object storage.
+2. **Payload Reception:** Accepts a JSON payload containing an input `objectKey` referencing a file in the configured S3 bucket.
+3. **Execution:** Downloads the target video from S3, injects it into the ComfyUI workflow, and queues the generation prompt.
+4. **Telemetry:** Continuously updates a custom backend API with the processing progress (percentage and status).
+5. **Storage & Egress:** Uploads the generated MP4 directly to the designated S3 output bucket via `boto3` and pushes the final object key to the custom backend API. The RunPod endpoint returns a simple success state.
 
 ## Environment Variables (`.env`)
 
-For local execution and production deployment, the container requires the following environment variables to authenticate with Cloudflare R2.
-
-Create a `.env` file in the root directory:
+The container requires the following environment variables for S3 authentication and backend telemetry.
 
 ```env
-BUCKET_ENDPOINT_URL=https://<YOUR_CLOUDFLARE_ACCOUNT_ID>.r2.cloudflarestorage.com
-BUCKET_NAME=<YOUR_BUCKET_NAME>
-AWS_DEFAULT_REGION=auto
-BUCKET_ACCESS_KEY_ID=<YOUR_R2_ACCESS_KEY>
-BUCKET_SECRET_ACCESS_KEY=<YOUR_R2_SECRET_KEY>
+# S3 Configuration (Supabase/R2/AWS)
+SUPABASE_S3_ENDPOINT=https://<YOUR_S3_ENDPOINT>
+SUPABASE_S3_ACCESS_KEY=<YOUR_ACCESS_KEY>
+SUPABASE_S3_SECRET_KEY=<YOUR_SECRET_KEY>
+SUPABASE_S3_REGION=auto
+SUPABASE_S3_BUCKET=<YOUR_INPUT_BUCKET_NAME>
+SUPABASE_S3_BUCKET_OUTPUT=<YOUR_OUTPUT_BUCKET_NAME>
+
+# Backend Telemetry Configuration
+BACKEND_API_URL=https://<YOUR_BACKEND_API>
+BACKEND_API_KEY=<YOUR_BEARER_TOKEN>
+X_ADMIN_TOKEN=<YOUR_ADMIN_TOKEN>
 
 ```
 
@@ -50,26 +52,26 @@ Once the terminal outputs `ComfyUI server is ready.`, dispatch a synchronous tes
 ```bash
 curl -X POST http://localhost:8000/runsync \
   -H "Content-Type: application/json" \
-  -d '{"input": {"video_url": "https://example.com/path/to/input.mp4"}}'
+  -d '{"input": {"objectKey": "test_video.mp4"}}'
 
 ```
 
 ## Production API Integration
 
-In a production environment, the generation process (approx. 130 seconds) exceeds standard HTTP timeout thresholds. **You must utilize the asynchronous `/run` endpoint.** Do not use `/runsync` in production.
+In a production environment, the generation process exceeds standard HTTP timeout thresholds. Utilize the asynchronous `/run` endpoint. Do not use `/runsync` in production.
 
 ### 1. Dispatch Request
 
-Send the initial payload to the RunPod endpoint.
+Send the initial payload to the RunPod endpoint. The input requires the S3 `objectKey` of the source video.
 
 ```http
-POST https://api.runpod.ai/v2/<ENDPOINT_ID>/run
+POST [https://api.runpod.ai/v2/](https://api.runpod.ai/v2/)<ENDPOINT_ID>/run
 Authorization: Bearer <RUNPOD_API_KEY>
 Content-Type: application/json
 
 {
   "input": {
-    "video_url": "https://example.com/path/to/input.mp4"
+    "objectKey": "user_uploads/source_video.mp4"
   }
 }
 
@@ -77,26 +79,39 @@ Content-Type: application/json
 
 **Response:** Returns a `job_id` and a status of `IN_QUEUE`.
 
-### 2. Status Polling
+### 2. Status Polling & Backend Telemetry
 
-Implement a client-side polling loop (every 3–5 seconds) to check the job status.
+The worker uses dual-reporting.
+
+**RunPod Native Polling:**
+Check the execution state via the RunPod API.
 
 ```http
-GET https://api.runpod.ai/v2/<ENDPOINT_ID>/status/<JOB_ID>
+GET [https://api.runpod.ai/v2/](https://api.runpod.ai/v2/)<ENDPOINT_ID>/status/<JOB_ID>
 Authorization: Bearer <RUNPOD_API_KEY>
 
 ```
 
+**Backend Webhook (Push):**
+Simultaneously, the worker issues `PUT` requests to your configured `BACKEND_API_URL` to update granular job states:
+
+* 5%: Initializing S3
+* 15%: Download complete
+* 20%: Prompt queued
+* 90%: Workflow execution finished
+* 100%: Upload complete
+
 ### 3. Final Output
 
-Once the worker completes the generation and S3 upload, the status endpoint will return `COMPLETED` along with the pre-signed R2 URL.
+Upon completion, the script uploads the resulting MP4 using the `job_id` as the filename (`<job_id>.mp4`). The backend telemetry will receive the `stickmanifiedS3ObjectKey`.
+
+The RunPod status endpoint will return a standard completion object without generating a pre-signed URL:
 
 ```json
 {
   "status": "COMPLETED",
   "output": {
-    "status": "success",
-    "video_url": "https://<R2_PRESIGNED_URL_PARAMETERS>"
+    "status": "success"
   }
 }
 
