@@ -104,19 +104,19 @@ def handler(event):
                         print(f"Success. Video located at: {physical_path}")
                         
                         upload_filename = f"{job_id}.mp4"
-                        bucket_name = os.environ.get('BUCKET_NAME')
+                        bucket_name = os.environ.get('SUPABASE_S3_BUCKET') # BUCKET_NAME
                         
                         # Standard Boto3 initialization for Cloudflare R2
                         s3_client = boto3.client(
                             's3',
-                            endpoint_url=os.environ.get('BUCKET_ENDPOINT_URL'),
-                            aws_access_key_id=os.environ.get('BUCKET_ACCESS_KEY_ID'),
-                            aws_secret_access_key=os.environ.get('BUCKET_SECRET_ACCESS_KEY'),
-                            region_name=os.environ.get('AWS_DEFAULT_REGION', 'auto')
+                            endpoint_url=os.environ.get('SUPABASE_S3_ENDPOINT'), # BUCKET_ENDPOINT_URL
+                            aws_access_key_id=os.environ.get('SUPABASE_S3_ACCESS_KEY'), # BUCKET_ACCESS_KEY_ID
+                            aws_secret_access_key=os.environ.get('SUPABASE_S3_SECRET_KEY'), # BUCKET_SECRET_ACCESS_KEY
+                            region_name=os.environ.get('SUPABASE_S3_REGION', 'auto') # AWS_DEFAULT_REGION
                         )
                         
                         # Upload directly to R2
-                        s3_client.upload_file(physical_path, bucket_name, upload_filename)
+                        s3_client.upload_file(physical_path, bucket_name, upload_filename, ExtraArgs={'ContentType': 'video/mp4'})
                         
                         # Generate SigV4 pre-signed URL
                         public_url = s3_client.generate_presigned_url(
@@ -127,6 +127,8 @@ def handler(event):
                         
                         # Clean up the local file to prevent storage bloat
                         os.remove(physical_path)
+                        if os.path.exists(input_video_path):
+                            os.remove(input_video_path)
                         
                         return {
                             "status": "success", 
