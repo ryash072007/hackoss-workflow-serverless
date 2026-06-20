@@ -76,7 +76,8 @@ def update_job_status(job_id, status, percent, object_key=None, error_msg=None):
         payload["errorMessage"] = error_msg
 
     headers = {
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "X-ADMIN-TOKEN": os.environ.get("X_ADMIN_TOKEN")
     }
     
     # If your backend requires an auth token to prevent random people from updating jobs
