@@ -54,8 +54,6 @@ def download_video(url, save_path):
                 f.write(chunk)
     return save_path
 
-
-
 def handler(event):
     """The serverless handler function."""
     print("Worker Start")
@@ -65,15 +63,9 @@ def handler(event):
     
     input_data = event.get('input', {})
     object_key = input_data.get('objectKey')
-    # video_url = input_data.get('video_url')
 
     if not object_key:
         return {"error": "object_key not provided"}
-
-    # # Download the input video
-    # video_filename = os.path.basename(urlparse(video_url).path)
-    # input_video_path = os.path.join(COMFYUI_DIR, "input", video_filename)
-    # download_video(video_url, input_video_path)
 
     bucket_name = os.environ.get('SUPABASE_S3_BUCKET')
     
@@ -131,16 +123,7 @@ def handler(event):
                         print(f"Success. Video located at: {physical_path}")
                         
                         upload_filename = f"{job_id}.mp4"
-                        bucket_name = os.environ.get('SUPABASE_S3_BUCKET') # BUCKET_NAME
-                        
-                        # Standard Boto3 initialization for Cloudflare R2
-                        # s3_client = boto3.client(
-                        #     's3',
-                        #     endpoint_url=os.environ.get('SUPABASE_S3_ENDPOINT'), # BUCKET_ENDPOINT_URL
-                        #     aws_access_key_id=os.environ.get('SUPABASE_S3_ACCESS_KEY'), # BUCKET_ACCESS_KEY_ID
-                        #     aws_secret_access_key=os.environ.get('SUPABASE_S3_SECRET_KEY'), # BUCKET_SECRET_ACCESS_KEY
-                        #     region_name=os.environ.get('SUPABASE_S3_REGION', 'auto') # AWS_DEFAULT_REGION
-                        # )
+                        bucket_name = os.environ.get('SUPABASE_S3_BUCKET_OUTPUT') # BUCKET_NAME
                         
                         # Upload directly to R2
                         s3_client.upload_file(physical_path, bucket_name, upload_filename, ExtraArgs={'ContentType': 'video/mp4'})
