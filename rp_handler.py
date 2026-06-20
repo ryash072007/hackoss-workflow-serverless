@@ -75,14 +75,19 @@ def update_job_status(job_id, status, percent, object_key=None, error_msg=None):
     if error_msg:
         payload["errorMessage"] = error_msg
 
+    X_ADMIN_TOKEN = os.environ.get("X_ADMIN_TOKEN")
+
     headers = {
         "Content-Type": "application/json",
-        "X-ADMIN-TOKEN": os.environ.get("X_ADMIN_TOKEN")
+        "X-ADMIN-TOKEN": X_ADMIN_TOKEN
     }
     
+    print(f"[DEBUG] Sending request to: {endpoint}")
+    print(f"[DEBUG] Loaded X_ADMIN_TOKEN from environment: {X_ADMIN_TOKEN}")
+
     # If your backend requires an auth token to prevent random people from updating jobs
-    if BACKEND_API_KEY:
-        headers["Authorization"] = f"Bearer {BACKEND_API_KEY}"
+    # if BACKEND_API_KEY:
+    #     headers["Authorization"] = f"Bearer {BACKEND_API_KEY}"
 
     try:
         response = requests.put(endpoint, json=payload, headers=headers, timeout=10)
@@ -96,9 +101,9 @@ def handler(event):
     print("Worker Start")
     
     # Capture the unique RunPod job ID to use as the output filename
-    job_id = event.get('id', str(uuid.uuid4())) 
     
     input_data = event.get('input', {})
+    job_id = input_data.get('jobId') 
     object_key = input_data.get('objectKey')
 
     if not object_key:
