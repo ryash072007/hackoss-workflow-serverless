@@ -6,6 +6,7 @@ import requests
 import json
 import uuid
 import os
+import sys
 import boto3
 from botocore.config import Config
 from urllib.parse import urlparse
@@ -14,22 +15,35 @@ from urllib.parse import urlparse
 COMFYUI_DIR = "/ComfyUI"
 COMFYUI_URL = "http://127.0.0.1:8188"
 
+# Global tracking variable for the process object
+comfy_process = None
+
 def start_comfyui():
-    """Starts the ComfyUI server."""
+    """Starts the ComfyUI server and assigns it to a global variable."""
+    global comfy_process
     command = "python3 main.py --listen"
     # Execute the subprocess in COMFYUI_DIR without changing the global process directory
-    server_process = subprocess.Popen(command.split(), cwd=COMFYUI_DIR)
-    return server_process
+    comfy_process = subprocess.Popen(command.split(), cwd=COMFYUI_DIR)
+    
+    # Block until process completes (runs in daemon thread, but allows us to capture early exit)
+    comfy_process.wait()
+    print(f"[CRITICAL] ComfyUI background process exited with code {comfy_process.returncode}")
 
 def check_server_ready(url):
-    """Check if the server is ready to accept requests."""
+    """Check if the server is ready to accept requests, while validating process health."""
+    global comfy_process
     while True:
+        # Crucial Defensive Fix: If the process died, exit immediately to stop billing
+        if comfy_process and comfy_process.poll() is not None:
+            print(f"[FATAL] ComfyUI process crashed with code {comfy_process.poll()} during startup.")
+            sys.exit(1)
+
         try:
-            response = requests.get(url)
+            response = requests.get(url, timeout=2)
             if response.status_code == 200:
                 print("ComfyUI server is ready.")
                 break
-        except requests.exceptions.ConnectionError:
+        except requests.exceptions.RequestException:
             print("Waiting for ComfyUI server...")
             time.sleep(1)
 
@@ -85,10 +99,6 @@ def update_job_status(job_id, status, percent, object_key=None, error_msg=None):
     print(f"[DEBUG] Sending request to: {endpoint}")
     print(f"[DEBUG] Loaded X_ADMIN_TOKEN from environment: {X_ADMIN_TOKEN}")
 
-    # If your backend requires an auth token to prevent random people from updating jobs
-    # if BACKEND_API_KEY:
-    #     headers["Authorization"] = f"Bearer {BACKEND_API_KEY}"
-
     try:
         response = requests.put(endpoint, json=payload, headers=headers, timeout=10)
         response.raise_for_status()
@@ -98,10 +108,15 @@ def update_job_status(job_id, status, percent, object_key=None, error_msg=None):
 
 def handler(event):
     """The serverless handler function."""
+    global comfy_process
     print("Worker Start")
     
-    # Capture the unique RunPod job ID to use as the output filename
-    
+    # Fail-fast check: Did ComfyUI crash while sitting idle between jobs?
+    if comfy_process and comfy_process.poll() is not None:
+        err = f"ComfyUI engine was dead on arrival. Code: {comfy_process.poll()}"
+        print(f"[FATAL] {err}")
+        sys.exit(2) # Crashing the handler forces RunPod to cycle the pod instance
+
     input_data = event.get('input', {})
     job_id = input_data.get('jobId') 
     object_key = input_data.get('objectKey')
@@ -114,7 +129,6 @@ def handler(event):
     update_job_status(job_id, "IN_PROGRESS", 5)
     bucket_name = os.environ.get('SUPABASE_S3_BUCKET')
     
-    # Initialize S3 Client immediately for both download and upload
     try:
         s3_client = boto3.client(
             's3',
@@ -128,7 +142,6 @@ def handler(event):
         update_job_status(job_id, "FAILED", 10, error_msg=err)
         return {"error": f"Failed to initialize S3 client: {str(e)}"}
 
-    # Download source video using objectKey
     video_filename = os.path.basename(object_key)
     input_video_path = os.path.join(COMFYUI_DIR, "input", video_filename)
     
@@ -141,25 +154,37 @@ def handler(event):
         update_job_status(job_id, "FAILED", 10, error_msg=err)
         return {"error": f"Failed to download video from S3: {str(e)}"}
 
-    # Load the workflow using an absolute path
     script_dir = os.path.dirname(os.path.abspath(__file__))
     workflow_path = os.path.join(script_dir, "oss_stickman_api.json")
     
     with open(workflow_path, 'r') as f:
         prompt = json.load(f)
 
-    # Update the video path in the workflow
-    # Node 154 is the LoadVideo node
     prompt["154"]["inputs"]["video"] = video_filename
 
-    # Queue the prompt
-    prompt_id = queue_prompt(prompt)['prompt_id']
-    
+    try:
+        prompt_id = queue_prompt(prompt)['prompt_id']
+    except Exception as e:
+        err = f"Failed to submit workflow task to ComfyUI backend: {str(e)}"
+        update_job_status(job_id, "FAILED", 18, error_msg=err)
+        return {"error": err}
+        
     update_job_status(job_id, "IN_PROGRESS", 20)
 
     # Wait for the output
     while True:
-        history = get_history(prompt_id)
+        # Operational loop insurance: stop checking history if ComfyUI crashes mid-inference
+        if comfy_process and comfy_process.poll() is not None:
+            err = "ComfyUI process crashed mid-execution."
+            update_job_status(job_id, "FAILED", 50, error_msg=err)
+            sys.exit(3)
+
+        try:
+            history = get_history(prompt_id)
+        except Exception as e:
+            print(f"Polling history error (retrying): {str(e)}")
+            time.sleep(1)
+            continue
         
         if prompt_id in history:
             update_job_status(job_id, "IN_PROGRESS", 90)
@@ -176,29 +201,17 @@ def handler(event):
                         print(f"Success. Video located at: {physical_path}")
                         
                         upload_filename = f"{job_id}.mp4"
-                        bucket_name = os.environ.get('SUPABASE_S3_BUCKET_OUTPUT') # BUCKET_NAME
+                        bucket_name = os.environ.get('SUPABASE_S3_BUCKET_OUTPUT')
                         
-                        # Upload directly to R2
                         s3_client.upload_file(physical_path, bucket_name, upload_filename, ExtraArgs={'ContentType': 'video/mp4'})
                         
-                        # Generate SigV4 pre-signed URL
-                        # public_url = s3_client.generate_presigned_url(
-                        #     'get_object',
-                        #     Params={'Bucket': bucket_name, 'Key': upload_filename},
-                        #     ExpiresIn=604800 
-                        # )
-                        
-                        # Clean up the local file to prevent storage bloat
                         os.remove(physical_path)
                         if os.path.exists(input_video_path):
                             os.remove(input_video_path)
                         
                         update_job_status(job_id, "COMPLETED", 100, object_key=upload_filename)
 
-                        return {
-                            "status": "success", 
-                            # "video_url": public_url
-                        }
+                        return {"status": "success"}
             
             err = "Workflow completed but no final video was found."
             update_job_status(job_id, "FAILED", 90, error_msg=err)
@@ -213,7 +226,7 @@ if __name__ == '__main__':
     server_thread.daemon = True
     server_thread.start()
 
-    # Wait for the server to be ready
+    # Wait for the server to be ready (will exit script if ComfyUI fails)
     check_server_ready(COMFYUI_URL)
     
     # Start the RunPod serverless worker
